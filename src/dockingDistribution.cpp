@@ -1399,5 +1399,3 @@ int main(int argc, char** argv) {
   cout << "testing" << endl;
   return(0);
 }
-
-//example command: ./dockingDistribution --ca "/dartfs/rc/lab/G/Grigoryanlab/home/coy/AbAgTERMs/alphafold8080ColabResultsAb_matchedbb/crystal/6yu8_bef6732d-1f2b-41e2-960b-d5c68c4250b2_0.9186929628704293.pdb" --cb "/dartfs/rc/lab/G/Grigoryanlab/home/coy/AbAgTERMs/alphafold8080ColabResultsAg_matchedbb/crystal/6yu8_4acaabcc-e98e-4ddc-a8c1-cece355b44c3_2.555964177325445.pdb" --da "/dartfs/rc/lab/G/Grigoryanlab/home/coy/AbAgTERMs/alphafold8080ColabResultsAb_matchedbb/af/6yu8_bef6732d-1f2b-41e2-960b-d5c68c4250b2_0.9186929628704293.pdb" --db "/dartfs/rc/lab/G/Grigoryanlab/home/coy/AbAgTERMs/alphafold8080ColabResultsAg_matchedbb/af/6yu8_4acaabcc-e98e-4ddc-a8c1-cece355b44c3_2.555964177325445.pdb"  --o "/dartfs/rc/lab/G/Grigoryanlab/home/coy/Dartmouth_PhD_Repo/ColabAf6yu8DD.txt" --n 10000 --abm

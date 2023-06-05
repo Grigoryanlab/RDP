@@ -613,7 +613,3 @@ if bErr:
     print("Error running dockingDistribution binary: " + jobErr)
 else:
     print(jobOut)
-
-# example command #1: python3 atom_match_n_RDP.py -a /dartfs/rc/lab/G/Grigoryanlab/home/coy/databases/clusProAbAgEvaluationDB_abm/crystals_IMGT/1ahw.pdb -b /dartfs/rc/lab/G/Grigoryanlab/home/coy/databases/clusProAbAgEvaluationDB_abm/models_IMGT/1ahw_0000.pdb -a1 'A,B' -a2 'C' -ml /dartfs/rc/lab/G/Grigoryanlab/home/coy/MST/lib -n 10 -abm True -o RDPs/testRDP.txt -q True
-
-# example command #2: *** 40 WITH MBL & ALSO AL / BL TESTING
