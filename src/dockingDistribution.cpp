@@ -75,7 +75,6 @@ AtomPointerVector getHeavyAtoms(AtomPointerVector startingAtoms) {
   return heavyAtoms;
 }
 
-// ***
 vector<vector<int>> getABindexes(AtomPointerVector aAtoms,AtomPointerVector bAtoms,mstreal conDist) {
   ProximitySearch psA(aAtoms, 15);
   vector<int> aIdx = {};
@@ -133,8 +132,6 @@ mstreal getDOCKQ(Structure* s2evalP, Structure* s2evalAP, AtomPointerVector s2ev
   Structure s2eval = *s2evalP;
   Structure s2evalA = *s2evalAP;
   Structure s2evalB = *s2evalBP;
-  //AtomPointerVector s2evalAatoms = getHeavyAtoms(s2evalA.getAtoms());
-  //AtomPointerVector s2evalBatoms = getHeavyAtoms(s2evalB.getAtoms());
   AtomPointerVector s2evalAatoms = s2evalA.getAtoms();
   AtomPointerVector s2evalBatoms = s2evalB.getAtoms();
 
@@ -188,6 +185,54 @@ mstreal getDOCKQ(Structure* s2evalP, Structure* s2evalAP, AtomPointerVector s2ev
   return dockQscore;
 }
 
+// quickly gets a random rotation and orientation matrix - see 1992 Arvo paper for details https://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.53.1357&rep=rep1&type=pdf
+Transform getRandRotOrient() {  
+
+    // make Z pole rotation matrix...
+    mstreal x1 = MstUtils::randUnit(0,1);
+    mstreal zRot[3][3] = {
+    {cos(2*M_PI*x1), sin(2*M_PI*x1), 0},
+    {-sin(2*M_PI*x1), cos(2*M_PI*x1), 0},
+    {0, 0, 1},
+    } ;
+
+    // make v (unit vector paralel to zp, the line between the top of the Z pole and the point to rotate to)
+    mstreal x2 = MstUtils::randUnit(0,1);
+    mstreal x3 = MstUtils::randUnit(0,1);
+    mstreal v[3] = {
+    cos(2*M_PI*x2) * sqrt(x3),
+    sin(2*M_PI*x2) * sqrt(x3),
+    sqrt(1 - x3)
+    } ;
+
+    mstreal houseHolder [3][3] = { 
+    { 1 - (2*v[0]*v[0]) , 0 - (2*v[0]*v[1]) , 0 - (2*v[0]*v[2]) },
+    { 0 - (2*v[1]*v[0]) , 1 - (2*v[1]*v[1]) , 0 - (2*v[1]*v[2]) },
+    { 0 - (2*v[2]*v[0]) , 0 - (2*v[2]*v[1]) , 1 - (2*v[2]*v[2]) }   
+    } ;
+
+    // final matrix M = -(H @ R) (Householder on rotation, negative to flip and preserve left-rightness). Maxtrix multiplication goes along rows (counted by i) of the left matrix (H) and columns (counted by j) of the right matrix (R)
+    
+    vector<vector<mstreal> > finalMvalues;
+    for (int i = 0; i < 3; i++) {
+
+        vector<mstreal> rowValues;
+        for (int j = 0; j < 3; j++) {
+
+            mstreal nextValue = 0;
+            for (int k = 0; k < 3; k++) {
+                nextValue += -1 * houseHolder[i][k] * zRot[k][j];
+            }
+            rowValues.push_back(nextValue);
+        }
+
+        finalMvalues.push_back(rowValues);
+    }
+
+    Transform finalM(finalMvalues);
+    return(finalM);
+}
+
 int main(int argc, char** argv) {
   /*time_t start_time = time(NULL);
   cout << "start time: " << ctime(&start_time) << endl;*/
@@ -198,24 +243,24 @@ int main(int argc, char** argv) {
   op.addOption("r", "instead of using complex RMSD, use the sum of ligand-RMSD & receptor-RMSD", false);
   op.addOption("dq", "instead of using the sum of complex RMSD, do DOCKQ as the underlying measurement", false);
   op.addOption("mbl", "there are multiple binding locations for a; this flag will take paths to pdb files containing backbone-matched alternative binding locations, separated out by commas", false);
-  op.addOption("ca", "one half of the correctly docked structure, in pdb form, after having its backbone paired with that of the simulated docked structure via match_backbones.py; if using antibody mode, this should be the antibody ", true);
-  op.addOption("da", "one half of the simulated docked structure, in pdb form, after having its backbone paired with that of the correctly docked structure via match_backbones.py (see -ca); if using antibody mode, this should be the antibody ", true);
-  op.addOption("cb", "the other half of the correctly docked structure, in pdb form, after having its backbone paired with that of the simulated docked structure via match_backbones.py", true);
-  op.addOption("db", "the other half of the simulated docked structure, in pdb form, after having its backbone paired with that of the correctly docked structure via match_backbones.py (see -cb); if using antibody mode, this should be the antibody ", true);
+  op.addOption("ta", "one half of the correctly docked structure, in pdb form, after having its backbone paired with that of the simulated docked structure via match_backbones.py; if using antibody mode, this should be the antibody ", true);
+  op.addOption("ma", "one half of the simulated docked structure, in pdb form, after having its backbone paired with that of the correctly docked structure via match_backbones.py (see -ta); if using antibody mode, this should be the antibody ", true);
+  op.addOption("tb", "the other half of the correctly docked structure, in pdb form, after having its backbone paired with that of the simulated docked structure via match_backbones.py", true);
+  op.addOption("mb", "the other half of the simulated docked structure, in pdb form, after having its backbone paired with that of the correctly docked structure via match_backbones.py (see -tb); if using antibody mode, this should be the antibody ", true);
   op.addOption("n", "the number of valid docking positions to generate; defaults to 1 million, which should take around 1 hour per every 500 residues in the complex");
-  op.addOption("i", "the number of valid interaction residues required to accept the structure; defaults to 1");
-  op.addOption("cla", "the number of clashes allowed in an accepted structure; defaults to 3");
-  op.addOption("sd", "the standard deviation of the normal distribution used to pull the docking partners apart from each other; defaults to 1.0; in angstroms");
-  op.addOption("al", "an optional list of binding residues for the first docking partner (see -ca); this will bias the random docking towards conformations including those residues in the binding site. Should be a list of tuples, where each tuple has the chain followed by the residue number followed by the residue insertion code (or ' ' if no insertion code). Separate each member of the tuple with a comma, and each tuple with a semi-colon, like 'A,100, ;A,100,A;A,100,B'. If you're only giving binding residues for one of the two partners, it must be this one (i.e. you cannot give bl without giving al)");
-  op.addOption("bl", "an optional list of binding residues for the second docking partner (see -cb); this will bias the random docking towards conformations including those residues in the binding site. Should be a list of tuples, where each tuple has the chain followed by the residue number followed by the residue insertion code (or ' ' if no insertion code). Separate each member of the tuple with a comma, and each tuple with a semi-colon, like A,100,;A,100,A;A,100,B.");
-  op.addOption("abm", "an optional antibody / TCR mode, which will treat all the loops of the antibody as the binding residues; the antibody structure must use IMGT numbering and its structure must be entered using the -ca argument not the -cb argument.");
+  op.addOption("i", "the number of valid interaction residues required to accept the structure; defaults to 0");
+  op.addOption("cla", "the number of clashes allowed in an accepted structure; defaults to 0");
+  op.addOption("sd", "the standard deviation of the normal distribution used to pull the docking partners apart from each other; defaults to 2.0; in angstroms");
+  op.addOption("al", "an optional list of binding residues for the first docking partner (see -ta); this will bias the random docking towards conformations including those residues in the binding site. Should be a list of tuples, where each tuple has the chain followed by the residue number followed by the residue insertion code (or ' ' if no insertion code). Separate each member of the tuple with a comma, and each tuple with a semi-colon, like 'A,100, ;A,100,A;A,100,B'. If you're only giving binding residues for one of the two partners, it must be this one (i.e. you cannot give bl without giving al)");
+  op.addOption("bl", "an optional list of binding residues for the second docking partner (see -tb); this will bias the random docking towards conformations including those residues in the binding site. Should be a list of tuples, where each tuple has the chain followed by the residue number followed by the residue insertion code (or ' ' if no insertion code). Separate each member of the tuple with a comma, and each tuple with a semi-colon, like A,100,;A,100,A;A,100,B.");
+  op.addOption("abm", "an optional antibody / TCR mode, which will treat all the loops of the antibody as the binding residues; the antibody structure must use IMGT numbering and its structure must be entered using the -ta argument not the -tb argument.");
   op.addOption("cdr3", "limit the antibody / TCR mode to using CDR3 loop contacts only");
-  op.addOption("q", "an optional quick mode for the --al or --abm flags, wherein the docking distribution is skewed towards conformations involving the binding residues given on the A side, to make the calculation faster");
   op.addOption("limA", "Must be used with al or abm, and bl. Optionally limit the range of angles of accepted dockings, wherein each binding partner has a line drawn between its geometric center and the geometric center of its binding residues; one line is used as an axis, and the other is used to calculate the angle of tilt relative to that axis. Primarily useful for TCRpMHC random dockings.");
   op.addOption("cache", "Use a cached distribution of underlying distance metrics instead; supply the path to that csv file here.");
   op.addOption("j", "Just print the underlying distance metric between the two structures instead of doing comparisons.");
   op.addOption("o", "the output file to save the distribution of RMSDs, as a comma separated list", true);
   op.addOption("t", "create testing files; provide the output directory to save the testing files. This also sets the number of dockings to just 10 so you aren't inundated with files on accident :)");
+  op.addOption("pbs", "save partner B's structures, for visualization purposes");
   op.setOptions(argc, argv);
   MstUtils::seedRandEngine();
 
@@ -242,11 +287,6 @@ int main(int argc, char** argv) {
     }
   }
 
-  if (op.isGiven("q") && (!(op.isGiven("al")) && !(op.isGiven("abm")))) {
-    cout << "you cannot give q without giving al or abm";
-    exit(1);
-  }
-
   int contactsRequired;
   if (op.isGiven("i")) {
     contactsRequired = stoi(op.getString("i"));
@@ -260,49 +300,54 @@ int main(int argc, char** argv) {
     clashesAllowed = stoi(op.getString("cla"));
   }
   else {
-    clashesAllowed = 3;
+    clashesAllowed = 0;
   }
 
-  mstreal normalDistBase = 1.0;
-
-  // load backbone or full-atom structures
-
-  Structure CA00(op.getString("ca"));
-  AtomPointerVector CA0heavy = getHeavyAtoms(CA00.getAtoms());
-  Structure CA0(CA0heavy);
-
-  Structure CB00(op.getString("cb"));
-  AtomPointerVector CB0heavy = getHeavyAtoms(CB00.getAtoms());
-  Structure CB0(CB0heavy);
-
-  Structure DA0(op.getString("da"));
-  AtomPointerVector DAheavy = getHeavyAtoms(DA0.getAtoms());
-  Structure DA(DAheavy);
-
-  Structure DB0(op.getString("db"));
-  AtomPointerVector DBheavy = getHeavyAtoms(DB0.getAtoms());
-  Structure DB(DBheavy);
-
-  // make a full structure for C0, which is connected to CA0 / CB0 rather than a copy of them
-  Structure C0;
-  for (int i = 0; i < CA0.chainSize(); i++) {
-    C0.appendChain(&CA0.getChain(i));
+  mstreal normalDistBase;
+  if (op.isGiven("sd")) {
+    normalDistBase = stof(op.getString("sd"));
   }
-  for (int i = 0; i < CB0.chainSize(); i++) {
-    C0.appendChain(&CB0.getChain(i));
+  else {
+    normalDistBase = 2.0;
   }
 
-  Structure CC(C0); // a copy for doing RMSD calculations with
-  AtomPointerVector realAtoms = getHeavyAtoms(CC.getAtoms());
-  Structure CAC(CA0);
-  //AtomPointerVector realAtomsCA = getHeavyAtoms(CAC.getAtoms());
-  AtomPointerVector realAtomsCA = CAC.getAtoms();
-  Structure CBC(CB0);
-  //AtomPointerVector realAtomsCB = getHeavyAtoms(CBC.getAtoms());
-  AtomPointerVector realAtomsCB = CBC.getAtoms();
+  // load backbone or full-atom structures; make sure just working w/ heavy atoms
 
-  ProximitySearch psA(realAtomsCA, 15);
-  map<int,vector<int>> abResCons = getABcontactDict(realAtomsCA,realAtomsCB,5.0,psA);
+  Structure TAfull(op.getString("ta"));
+  AtomPointerVector TAheavyatoms = getHeavyAtoms(TAfull.getAtoms());
+  Structure TAheavy(TAheavyatoms);
+
+  Structure TBfull(op.getString("tb"));
+  AtomPointerVector TBheavyatoms = getHeavyAtoms(TBfull.getAtoms());
+  Structure TBheavy(TBheavyatoms);
+
+  Structure MAfull(op.getString("ma"));
+  AtomPointerVector MAheavyatoms = getHeavyAtoms(MAfull.getAtoms());
+  Structure MAheavy(MAheavyatoms);
+
+  Structure MBfull(op.getString("mb"));
+  AtomPointerVector MBheavyatoms = getHeavyAtoms(MBfull.getAtoms());
+  Structure MBheavy(MBheavyatoms);
+
+  // make a full structure for T, which is connected to TAheavy / TBheavy rather than a copy of them
+  Structure T;
+  for (int i = 0; i < TAheavy.chainSize(); i++) {
+    T.appendChain(&TAheavy.getChain(i));
+  }
+  for (int i = 0; i < TBheavy.chainSize(); i++) {
+    T.appendChain(&TBheavy.getChain(i));
+  }
+
+  //make copies of the true struccture, just A from the true structure, and just B from the true structure, to do RMSD calculations with
+  Structure Tcopy(T); 
+  AtomPointerVector realAtoms = getHeavyAtoms(Tcopy.getAtoms());
+  Structure TACopy(TAheavy);
+  AtomPointerVector realAtomsTA = TACopy.getAtoms();
+  Structure TBCopy(TBheavy);
+  AtomPointerVector realAtomsTB = TBCopy.getAtoms();
+
+  ProximitySearch psA(realAtomsTA, 15);
+  map<int,vector<int>> abResCons = getABcontactDict(realAtomsTA,realAtomsTB,5.0,psA);
 
   int conSize = 0;
   for (auto it = abResCons.cbegin(); it != abResCons.cend(); ++it) {
@@ -311,14 +356,14 @@ int main(int argc, char** argv) {
 
   // get the indexes and then interface structure for A & B, by a 10 Angstrom cutoff, in case DOCKQ is being used as an underlying distance metric
 
-  vector<vector<int>> ab10realIndexes = getABindexes(realAtomsCA,realAtomsCB,10.0);
+  vector<vector<int>> ab10realIndexes = getABindexes(realAtomsTA,realAtomsTB,10.0);
   vector<int> a10interfaceIndexesAll = ab10realIndexes[0];
   vector<int> b10interfaceIndexesAll = ab10realIndexes[1];
   vector<int> a10interfaceIndexesBB;
   vector<int> b10interfaceIndexesBB;
   AtomPointerVector ab10interface;
   for (int i = 0; i < a10interfaceIndexesAll.size(); i++) {
-    Atom* checkingAtom = realAtomsCA[a10interfaceIndexesAll[i]];
+    Atom* checkingAtom = realAtomsTA[a10interfaceIndexesAll[i]];
     if ((checkingAtom->getName() == "CA") or (checkingAtom->getName() == "C") or (checkingAtom->getName() == "N") or (checkingAtom->getName() == "O")) {
       ab10interface.push_back(checkingAtom);
       a10interfaceIndexesBB.push_back(a10interfaceIndexesAll[i]);
@@ -326,49 +371,49 @@ int main(int argc, char** argv) {
   }
 
   for (int i = 0; i < b10interfaceIndexesAll.size(); i++) {
-    Atom* checkingAtom = realAtomsCB[b10interfaceIndexesAll[i]];
+    Atom* checkingAtom = realAtomsTB[b10interfaceIndexesAll[i]];
     if ((checkingAtom->getName() == "CA") or (checkingAtom->getName() == "C") or (checkingAtom->getName() == "N") or (checkingAtom->getName() == "O")) {
       ab10interface.push_back(checkingAtom);
       b10interfaceIndexesBB.push_back(b10interfaceIndexesAll[i]);
     }
   }
 
-  // make a full structure for D, which is connected to DA / DB rather than a copy of them
-  Structure D;
-  for (int i = 0; i < DA.chainSize(); i++) {
-    D.appendChain(&DA.getChain(i));
+  // make a full structure for M (the model), which is connected to MAheavy / MBheavy rather than a copy of them
+  Structure M;
+  for (int i = 0; i < MAheavy.chainSize(); i++) {
+    M.appendChain(&MAheavy.getChain(i));
   }
-  for (int i = 0; i < DB.chainSize(); i++) {
-    D.appendChain(&DB.getChain(i));
+  for (int i = 0; i < MBheavy.chainSize(); i++) {
+    M.appendChain(&MBheavy.getChain(i));
   }
 
-  // if you're using model-structure partners for docking, make CA & CB out of them; otherwise stick with the crystal partners (CA0 & CB0) which is default
+  // if you're using model-structure partners for docking, make A & B out of them (MAheavy & MB heavy); otherwise stick with the crystal partners (TAheavy & TBheavy) which is default
 
-  Structure CA;
-  Structure CB;
+  Structure A;
+  Structure B;
 
   vector<AtomPointerVector> altBindingLocs;
   vector<AtomPointerVector> altBindingLocsBB;
   vector<AtomPointerVector> altBindingLocsAonly;
   vector<AtomPointerVector> altBindingLocsAbbOnly;
-  Structure CALT;
-  Structure CBCOPY;
+  Structure TAalt;
+  Structure TBCOPY;
 
   if (op.isGiven("mbl")) {
     vector<string> altBindingAstructs = MstUtils::split(op.getString("mbl"), ",");
     for (int i = 0; i < altBindingAstructs.size(); i++) {
-      CBCOPY = Structure(CB0);
-      string caltPath = altBindingAstructs[i];
-      CALT = Structure(caltPath);
-      AtomPointerVector caAltAtoms = getHeavyAtoms(CALT.getAtoms());
+      TBCOPY = Structure(TBheavy);
+      string taAltPath = altBindingAstructs[i];
+      TAalt = Structure(taAltPath);
+      AtomPointerVector taAltAtoms = getHeavyAtoms(TAalt.getAtoms());
 
-      altBindingLocsAonly.push_back(caAltAtoms);
-      altBindingLocsAbbOnly.push_back(getBBatoms(caAltAtoms));
+      altBindingLocsAonly.push_back(taAltAtoms);
+      altBindingLocsAbbOnly.push_back(getBBatoms(taAltAtoms));
 
-      for (int ii = 0; ii < CBCOPY.chainSize(); ii++) {
-        CALT.appendChain(&CBCOPY.getChain(ii));
+      for (int ii = 0; ii < TBCOPY.chainSize(); ii++) {
+        TAalt.appendChain(&TBCOPY.getChain(ii));
       }
-      AtomPointerVector cAltAtoms = getHeavyAtoms(CALT.getAtoms());
+      AtomPointerVector cAltAtoms = getHeavyAtoms(TAalt.getAtoms());
       
       altBindingLocs.push_back(cAltAtoms);
       altBindingLocsBB.push_back(getBBatoms(cAltAtoms));
@@ -382,7 +427,7 @@ int main(int argc, char** argv) {
    for (int i = 0; i < altBindingLocsAonly.size(); i++) {
     ProximitySearch psAlt(altBindingLocsAonly[i], 15);
 
-    map<int,vector<int>> abResConsAlt = getABcontactDict(altBindingLocsAonly[i],realAtomsCB,5.0,psAlt);
+    map<int,vector<int>> abResConsAlt = getABcontactDict(altBindingLocsAonly[i],realAtomsTB,5.0,psAlt);
 
     int conSizeAlt = 0;
     for (auto it = abResConsAlt.cbegin(); it != abResConsAlt.cend(); ++it) {
@@ -393,12 +438,12 @@ int main(int argc, char** argv) {
     conSizeAlts.push_back(conSizeAlt);
    }
 
-   //plus if alt binding locations, get the indexes / interface Structure for a 10 angstrom cutoff - also in case DOCKQ is used ***
+   //plus if alt binding locations, get the indexes / interface Structure for a 10 angstrom cutoff - also in case DOCKQ is used 
   vector<vector<int>> a10interfaceIndexesBBAlts;
   vector<vector<int>> b10interfaceIndexesBBAlts;
   vector<AtomPointerVector> ab10interfaceAlts;
   for (int i = 0; i < altBindingLocsAonly.size(); i++) {
-    vector<vector<int>> ab10realIndexesAlt = getABindexes(altBindingLocsAonly[i],realAtomsCB,10.0);
+    vector<vector<int>> ab10realIndexesAlt = getABindexes(altBindingLocsAonly[i],realAtomsTB,10.0);
     vector<int> a10interfaceIndexesAllAlt = ab10realIndexes[0];
     vector<int> b10interfaceIndexesAllAlt = ab10realIndexes[1];
     vector<int> a10interfaceIndexesBBAlt;
@@ -418,7 +463,7 @@ int main(int argc, char** argv) {
     } 
 
     for (int ii = 0; ii < b10interfaceIndexesAllAlt.size(); ii++) {
-      Atom* checkingAtom = realAtomsCB[b10interfaceIndexesAllAlt[ii]];
+      Atom* checkingAtom = realAtomsTB[b10interfaceIndexesAllAlt[ii]];
       if ((checkingAtom->getName() == "CA") or (checkingAtom->getName() == "C") or (checkingAtom->getName() == "N") or (checkingAtom->getName() == "O")) {
         ab10interfaceAlt.push_back(checkingAtom);
         b10interfaceIndexesBBAlt.push_back(b10interfaceIndexesAllAlt[ii]);
@@ -431,51 +476,46 @@ int main(int argc, char** argv) {
   }
 
   if (op.isGiven("m")) {
-    CA = Structure(DA); // this duplicates / does not connect CA & DA
-    CB = Structure(DB);
+    A = Structure(MAheavy); // this duplicates / does not connect A & MAheavy
+    B = Structure(MBheavy);
   }
   else {
-    CA = Structure(CA0);
-    CB = Structure(CB0);
+    A = Structure(TAheavy);
+    B = Structure(TBheavy);
   }
 
-  // make a full structure for C, which is connected to CA / CB rather than a copy of them
-  Structure C;
-  for (int i = 0; i < CA.chainSize(); i++) {
-    C.appendChain(&CA.getChain(i));
+  // make a full structure for W (our "working" structure, made up of partners A and B that will dock a million times), which is connected to A / B rather than a copy of them
+  Structure W;
+  for (int i = 0; i < A.chainSize(); i++) {
+    W.appendChain(&A.getChain(i));
   }
-  for (int i = 0; i < CB.chainSize(); i++) {
-    C.appendChain(&CB.getChain(i));
+  for (int i = 0; i < B.chainSize(); i++) {
+    W.appendChain(&B.getChain(i));
   }
 
-  //lilWriteTest("/dartfs/rc/lab/G/Grigoryanlab/home/coy/Dartmouth_PhD_Repo/dockingDistDebugging.txt","testing 3?");
+  vector <Residue*> Areses = A.getResidues();
+  AtomPointerVector Aatoms = A.getAtoms();
 
-  vector <Residue*> CAreses = CA.getResidues();
-  //AtomPointerVector CAatoms = getHeavyAtoms(CA.getAtoms());
-  AtomPointerVector CAatoms = CA.getAtoms();
+  vector <Residue*> Breses = B.getResidues();
+  AtomPointerVector Batoms = B.getAtoms();
 
-  vector <Residue*> CBreses = CB.getResidues();
-  //AtomPointerVector CBatoms = getHeavyAtoms(CB.getAtoms());
-  AtomPointerVector CBatoms = CB.getAtoms();
-
-  vector <Residue*> DAreses = DA.getResidues();
-  //AtomPointerVector DAatoms = getHeavyAtoms(DA.getAtoms());
-  AtomPointerVector DAatoms = DA.getAtoms();
+  vector <Residue*> MAreses = MAheavy.getResidues();
+  AtomPointerVector MAatoms = MAheavy.getAtoms();
 
   // for DOCKQ to get fnat later on
 
-  ProximitySearch psDQ2(DAatoms, 15);
+  ProximitySearch psDQ2(MAatoms, 15);
 
-  vector <Residue*> DBreses = DB.getResidues();
-  //AtomPointerVector DBatoms = getHeavyAtoms(DB.getAtoms());
-  AtomPointerVector DBatoms = DB.getAtoms();
+  vector <Residue*> MBreses = MBheavy.getResidues();
+  //AtomPointerVector MBatoms = getHeavyAtoms(MBheavy.getAtoms());
+  AtomPointerVector MBatoms = MBheavy.getAtoms();
 
-  AtomPointerVector CAbbAtoms = getBBatoms(CAatoms);
-  AtomPointerVector CBbbAtoms = getBBatoms(CBatoms);
-  AtomPointerVector DAbbAtoms = getBBatoms(DAatoms);
-  AtomPointerVector DBbbAtoms = getBBatoms(DBatoms);
-  AtomPointerVector realAtomsCAbb = getBBatoms(realAtomsCA);
-  AtomPointerVector realAtomsCBbb = getBBatoms(realAtomsCB);
+  AtomPointerVector AbbAtoms = getBBatoms(Aatoms);
+  AtomPointerVector BbbAtoms = getBBatoms(Batoms);
+  AtomPointerVector MAbbAtoms = getBBatoms(MAatoms);
+  AtomPointerVector MBbbAtoms = getBBatoms(MBatoms);
+  AtomPointerVector realAtomsCAbb = getBBatoms(realAtomsTA);
+  AtomPointerVector realAtomsCBbb = getBBatoms(realAtomsTB);
 
   RMSDCalculator rc;
   vector <mstreal> rmsdList {};
@@ -484,34 +524,33 @@ int main(int argc, char** argv) {
 
     // position 1
     if (op.isGiven("t")) {
-      C.writePDB(op.getString("t") + "position1" + ".pdb");
+      W.writePDB(op.getString("t") + "position1" + ".pdb");
     }
 
     // translate each to the origin
 
-    Transform TCA0 = TransformFactory::translate(-CAatoms.getGeometricCenter());
-    TCA0.apply(CA);
+    Transform TCA0 = TransformFactory::translate(-Aatoms.getGeometricCenter());
+    TCA0.apply(A);
 
-    Transform TCB0 = TransformFactory::translate(-CBatoms.getGeometricCenter());
-    TCB0.apply(CB);
+    Transform TCB0 = TransformFactory::translate(-Batoms.getGeometricCenter());
+    TCB0.apply(B);
 
     // position 2
     if (op.isGiven("t")) {
-      C.writePDB(op.getString("t") + "position2" + ".pdb");
+      W.writePDB(op.getString("t") + "position2" + ".pdb");
     }
 
     // if binding residues are given for A (or A has binding residues by virtue of this being run in antibody-antigen binding mode) get them; same for B
 
-    AtomPointerVector CAbinderAtoms;
-    AtomPointerVector CBbinderAtoms;
+    AtomPointerVector AbinderAtoms;
+    AtomPointerVector BbinderAtoms;
 
     vector<tuple <string, int, char>> aResesDetails; // stores details for binding residues for A
     vector<tuple <string, int, char>> bResesDetails; // stores details for binding residues for B
 
-    Structure aBinderS;
     if (op.isGiven("abm")) {
-      for (int i = 0; i < CAreses.size(); i++) {
-        Residue* currR = CAreses[i];
+      for (int i = 0; i < Areses.size(); i++) {
+        Residue* currR = Areses[i];
         int resNum = currR->getNum();
         bool isLoop = false;
 
@@ -527,32 +566,28 @@ int main(int argc, char** argv) {
         }
 
         if (isLoop == true) {
-          aBinderS.addResidue(currR);
-          AtomPointerVector cResAtoms = currR->getAtoms();
-          for (int ca = 0; ca < cResAtoms.size(); ca++) {
-            Atom* currA = cResAtoms[ca];
+          AtomPointerVector taResAtoms = currR->getAtoms();
+          for (int ca = 0; ca < taResAtoms.size(); ca++) {
+            Atom* currA = taResAtoms[ca];
             string cResAtomName = currA->getName();
-            if (!(op.isGiven("dq")) && (cResAtomName != "CA")) { // if not DOCKQ mode, and not a CA atom...
-              continue;
-            } // only get indexes for CAs, as contacts will be defined as inter-CA-distance of 10 angstroms or less, unless using DOCKQ mode in which case it's all atoms 5 angstroms or less
-            CAbinderAtoms.push_back(currA);
+            if (cResAtomName == "CA") { // only get indexes for CAs, as contacts will be defined as inter-A-distance of 8 angstroms or less
+              AbinderAtoms.push_back(currA);
+            } 
           }
         }
       }
-      if (op.isGiven("q")) {
-        //AtomPointerVector aBinderAtoms = getHeavyAtoms(aBinderS.getAtoms());
-        AtomPointerVector aBinderAtoms = aBinderS.getAtoms();
-        CartesianPoint geoCenterA = aBinderAtoms.getGeometricCenter();
-        Transform TZ = TransformFactory::alignVectorWithXAxis(geoCenterA);
-        TZ.apply(CA);
+      //rotate the binding residues in A up
+      CartesianPoint geoCenterA = AbinderAtoms.getGeometricCenter();
+      Transform TZ = TransformFactory::alignVectorWithZAxis(geoCenterA);
+      TZ.apply(A);
 
-        if (op.isGiven("t")) {
-          C.writePDB(op.getString("t") + "position3" + ".pdb");
-        }
+      if (op.isGiven("t")) {
+        W.writePDB(op.getString("t") + "position3" + ".pdb");
       }
     }
 
     else if (op.isGiven("al")) {
+
       // get the details for A's binding residues
       string aBinders = op.getString("al");
       vector<string> aResSplit1 = MstUtils::split(aBinders, ";");
@@ -568,8 +603,8 @@ int main(int argc, char** argv) {
 
       // go over each residue, and if its chain / number / ID code match, add it to the binding residues list! Also make a list of the binder indexes
 
-      for (int i = 0; i < CAreses.size(); i++) {
-        Residue* currR = CAreses[i];
+      for (int i = 0; i < Areses.size(); i++) {
+        Residue* currR = Areses[i];
         string resChain = currR->getChainID();
         int resNum = currR->getNum();
         char resIcode = currR->getIcode();
@@ -585,32 +620,42 @@ int main(int argc, char** argv) {
           //}
 
           if (isbindingRes) {
-            aBinderS.addResidue(currR);
-            AtomPointerVector cResAtoms = currR->getAtoms();
-            for (int ca = 0; ca < cResAtoms.size(); ca++) {
-              Atom* currA = cResAtoms[ca];
+            AtomPointerVector taResAtoms = currR->getAtoms();
+            for (int ca = 0; ca < taResAtoms.size(); ca++) {
+              Atom* currA = taResAtoms[ca];
               string cResAtomName = currA->getName();
-              if (!(op.isGiven("dq")) && (cResAtomName != "CA")) { // if not DOCKQ mode, and not a CA atom...
-                continue;
+              if (cResAtomName == "CA") {
+                AbinderAtoms.push_back(currA);
               }
-              CAbinderAtoms.push_back(currA);
             }
           }
         }
       }
-      if (op.isGiven("q")) {
-        AtomPointerVector aBinderAtoms = aBinderS.getAtoms();
-        CartesianPoint geoCenterA = aBinderAtoms.getGeometricCenter();
-        Transform TZ = TransformFactory::alignVectorWithXAxis(geoCenterA);
-        TZ.apply(CA);
+      //rotate the binding residues in A up
 
-        if (op.isGiven("t")) {
-          C.writePDB(op.getString("t") + "position3" + ".pdb");
+      CartesianPoint geoCenterA = AbinderAtoms.getGeometricCenter();
+      Transform TZ = TransformFactory::alignVectorWithZAxis(geoCenterA);
+      TZ.apply(A);
+
+      if (op.isGiven("t")) {
+        W.writePDB(op.getString("t") + "position3" + ".pdb");
+      }
+    }
+
+    //***
+    else {
+      for (int a = 0; a < Aatoms.size(); a++) {
+        Atom* currAtom = Aatoms[a];
+        string currName = currAtom->getName();
+        if (currName == "CA") { 
+          AbinderAtoms.push_back(currAtom);
         }
       }
     }
 
     // if binding residues are given for B, pre-store the details to iterate over easily
+
+    // *** CHECK OVER THIS WHOOOOLE SECTION AND THE ABOVE - MAKE SURE IT'S ALL RIGHT, THEN MAKE SURE THE "i" CHECKING IS BETWEEN DISCRETE RESIDUES ONLY
 
     if (op.isGiven("bl")) {
       string bBinders = op.getString("bl");
@@ -624,8 +669,8 @@ int main(int argc, char** argv) {
           bResesDetails.push_back(bResDetails);
       }
 
-      for (int i = 0; i < CBreses.size(); i++) {
-        Residue* currR = CBreses[i];
+      for (int i = 0; i < Breses.size(); i++) {
+        Residue* currR = Breses[i];
         string resChain = currR->getChainID();
         int resNum = currR->getNum();
         char resIcode = currR->getIcode();
@@ -642,12 +687,12 @@ int main(int argc, char** argv) {
           //}
 
           if (isbindingRes) {
-            AtomPointerVector cResAtoms = currR->getAtoms();
-            for (int ca = 0; ca < cResAtoms.size(); ca++) {
-              string cResAtomName = cResAtoms[ca]->getName();
-              if (cResAtomName == "CA") {
-                int cResIndx = cResAtoms[ca]->getIndex();
-                CBbinderAtoms.push_back(cResAtoms[ca]);
+            AtomPointerVector taResAtoms = currR->getAtoms();
+            for (int ca = 0; ca < taResAtoms.size(); ca++) {
+              Atom* currAtom = taResAtoms[ca];
+              string currName = currAtom->getName();
+              if (currName == "CA") {
+                BbinderAtoms.push_back(currAtom);
               }
             }
           }
@@ -655,21 +700,23 @@ int main(int argc, char** argv) {
       }
     }
 
-    vector<int> bBinderIndexes; // store the atom indexes of CA binding atoms
-    for (int i = 0; i < CBatoms.size(); i++) { // go over all atoms in CB...
-      Atom* currAtom = CBatoms[i];
-      string currAtomName = currAtom->getName();
-      if (!(op.isGiven("dq")) && (currAtomName != "CA")) { // if not DOCKQ mode, and not a CA atom...
-        continue;
-      }
-      Residue* currRes = currAtom->getParent();
-      string currChain = currRes->getChainID();
-      int currResNum = currRes->getNum();
-      char currResIcode = currRes->getIcode();
-      for (int ii = 0; ii < bResesDetails.size(); ii++) {
-        auto bResTuple = bResesDetails[ii];
-        if ((get<0>(bResTuple) == currChain) && (get<1>(bResTuple) == currResNum) && (get<2>(bResTuple) == currResIcode)) { // if the residue is a binding residue...
-          bBinderIndexes.push_back(i);
+    else {
+      vector<int> bBinderIndexes; // store the atom indexes of B binding atoms
+      for (int i = 0; i < Batoms.size(); i++) { // go over all atoms in B...
+        Atom* currAtom = Batoms[i];
+        string currAtomName = currAtom->getName();
+        if (!(op.isGiven("dq")) && (currAtomName != "CA")) { // if not DOCKQ mode, and not a A atom...
+          continue;
+        }
+        Residue* currRes = currAtom->getParent();
+        string currChain = currRes->getChainID();
+        int currResNum = currRes->getNum();
+        char currResIcode = currRes->getIcode();
+        for (int ii = 0; ii < bResesDetails.size(); ii++) {
+          auto bResTuple = bResesDetails[ii];
+          if ((get<0>(bResTuple) == currChain) && (get<1>(bResTuple) == currResNum) && (get<2>(bResTuple) == currResIcode)) { // if the residue is a binding residue...
+            bBinderIndexes.push_back(i);
+          }
         }
       }
     }
@@ -678,32 +725,29 @@ int main(int argc, char** argv) {
 
     int d = 0;
     int t = 0;
-    int t2 = 0;
-    //int t3 = 0;
     int fails = 0;
 
     // set up important vectors...
 
     // keep a list of indexes of previous clashes
-    vector <int> recentClashes;
+    vector <Atom*> recentClashes;
+    vector <int> recentClashIndexes;
     // and have a list of current clashes
-    vector <int> currClashes;
-    // as well as a list of indexes possible to be involved in contacts (CA atoms)
-    vector <int> aPossibleContacts;
-    vector <int> bPossibleContacts;
+    vector <Atom*> currClashes;
+    vector <int> currClashIndexes;
 
-    // set the curr coords of CA to be alt cords, so that they can be reset every new random docking
+    // set the curr coords of A to be alt cords, so that they can be reset every new random docking
 
-    for (int a = 0; a < CAatoms.size(); a++) {
-      Atom* currAtom = CAatoms[a];
+    for (int a = 0; a < Aatoms.size(); a++) {
+      Atom* currAtom = Aatoms[a];
       currAtom->clearAlternatives();
       currAtom->addAlternative(currAtom);
     }
 
-    // set the current coords of CB to be alternate coords, so that they can be reset every new random docking - also fill out which indexes are possible to make contacts in B, and get their atoms
+    // set the current coords of B to be alternate coords, so that they can be reset every new random docking - also fill out which indexes are possible to make contacts in B, and get their atoms
 
-    for (int a = 0; a < CBatoms.size(); a++) {
-      Atom* currAtom = CBatoms[a];
+    for (int a = 0; a < Batoms.size(); a++) {
+      Atom* currAtom = Batoms[a];
       currAtom->clearAlternatives();
       currAtom->addAlternative(currAtom);
       // as well as get indexes for the potential contact residues, if not already gotten from abm / al / bl flags being given
@@ -712,231 +756,239 @@ int main(int argc, char** argv) {
       }
       else {
         string currName = currAtom->getName();
-        if (op.isGiven("dq")) {
-          bPossibleContacts.push_back(a);
-          CBbinderAtoms.push_back(currAtom);
-        }
-        if (!(op.isGiven("dq")) && (currName == "CA")) {
-          bPossibleContacts.push_back(a);
-          CBbinderAtoms.push_back(currAtom);
+        if (currName == "CA") {
+          BbinderAtoms.push_back(currAtom);
         }
       }
     }
-
-    // and fill out which ones are possible to make contacts in A / get their atoms
-
-    for (int a = 0; a < CAatoms.size(); a++) {
-      Atom* currAtom = CAatoms[a];
-      if (op.isGiven("al") || op.isGiven("abm")) {
-        continue;
-      }
-      else {
-        string currName = currAtom->getName();
-        if (!(op.isGiven("dq")) && (currName != "CA")) { // if not DOCKQ mode, and not a CA atom...
-          continue;
-        }
-        aPossibleContacts.push_back(a);
-        CAbinderAtoms.push_back(currAtom);
-      }
-    }
-
-    if (op.isGiven("bl")) {
-      bPossibleContacts = bBinderIndexes;
-    }
-
-    // make structures out of the A binder atoms & B binder atoms, for using with calculateExtent below to get Y & Z dimensions to scale the Y / Z translations by
-
-    //Structure CAbinderS(CAbinderAtoms);
-    //Structure CBbinderS(CBbinderAtoms);
 
     // set up xyz high & low values to be used later in the loop, for checking xLow & xHigh when pulling out proteins
 
-    mstreal xLow;
-    mstreal xHigh;
-    mstreal yLow;
-    mstreal yHigh;
-    mstreal zLow;
-    mstreal zHigh;
-
-    // and variables for calculating the Y & Z extents for the Y & Z translations
-
-    mstreal ayExtent;
-    mstreal azExtent;
     mstreal axLow;
     mstreal axHigh;
     mstreal ayLow;
     mstreal ayHigh;
     mstreal azLow;
     mstreal azHigh;
-    mstreal ayLen;
-    mstreal azLen;
 
-    mstreal byExtent;
-    mstreal bzExtent;
     mstreal bxLow;
     mstreal bxHigh;
     mstreal byLow;
     mstreal byHigh;
     mstreal bzLow;
     mstreal bzHigh;
-    mstreal byLen;
-    mstreal bzLen;
 
     //& docking requirements
 
     mstreal clashDistance = 3.0;
-    
-    mstreal contactDistance;
-    if (op.isGiven("dq")) { // if using all atoms
-      contactDistance = 5.0;
-    }
-    else { // if using CA atoms
-      contactDistance = 8.0;
+    mstreal contactDistance = 8.0;
+
+
+
+    // set up proximity search with A, since B will be the partner moving
+
+    ProximitySearch psBB(AbbAtoms, 15);
+
+    // for DOCKQ
+    ProximitySearch psDQ(Aatoms, 15);
+
+    // and a proximity search with just A's A binding atoms - this is a ProximitySearch*
+
+    ProximitySearch psAbinders(AbinderAtoms, 15);
+
+
+    mstreal angleLim = 180;
+
+    if (op.isGiven("limA")) {
+      mstreal angleLim1 = stoi(op.getString("limA"));
+      if (angleLim1 < 180) {
+        angleLim = angleLim1;
+      }
+      else {
+        cout << "limA argument must be a number less than 180 (180 degrees would mean no limit)";
+        exit(0);
+      }
     }
 
-    mstreal angleOff;
+    // find the widest angle between two points in the binding atoms of A, and the geometric center of A; limit rotations to be at that angle or less, to skew away from useless dockings with no contacts between binding residues in A and B
+
+    if (op.isGiven("al") || op.isGiven("abm")) {
+
+      mstreal largestAngle = 0;
+      CartesianPoint geoCenterA = Aatoms.getGeometricCenter();
+
+      for (int ai = 0; ai < AbinderAtoms.size(); ai++) {
+
+        Atom* firstAtom = AbinderAtoms[ai];
+
+        for (int aii = ai + 1; aii < AbinderAtoms.size(); aii++) {
+
+          Atom* secondAtom = AbinderAtoms[aii];
+          mstreal angleOff = CartesianGeometry::angle(firstAtom,geoCenterA,secondAtom);
+
+          if (angleOff > largestAngle) {
+            largestAngle = angleOff;
+          }
+        }
+      }
+
+      if (largestAngle < angleLim) {
+        angleLim = largestAngle;
+      }
+
+    }
+
+    mstreal polCos;
+    mstreal polSin;
+    mstreal azCos;
+    mstreal azSin;
+    
+    mstreal intAnegLim = cos(angleLim*M_PI/180);
+    mstreal intAposLim = 1;
+
+    mstreal randPolar;
+    mstreal randAz;
+    mstreal randX;
+    mstreal randY;
+    mstreal randZ;
+    int backNforth;
 
     while (d < numberDockingsRequired) { // while the number of docked structures is still insufficient...
 
-      // reset to alt coors
-
-      for (int i = 0; i < CAreses.size(); i++) {
-        CAreses[i]->makeAlternativeMain(0); // reset to origin position
+      if (op.isGiven("t")) {
+        t++;
       }
 
-      for (int i = 0; i < CBreses.size(); i++) {
-        CBreses[i]->makeAlternativeMain(0); // reset to origin position
+      if (op.isGiven("t")) {
+        W.writePDB(op.getString("t") + "position4" + to_string(d) + ".pdb");
+      }
+
+      // reset to alt coors
+
+      if (op.isGiven("r")) {
+        for (int i = 0; i < Areses.size(); i++) {
+          Areses[i]->makeAlternativeMain(0); // reset to origin position
+        }
+      }
+
+      for (int i = 0; i < Breses.size(); i++) {
+        Breses[i]->makeAlternativeMain(0); // reset to origin position
       }
 
       //position 4
 
-      if ((op.isGiven("t")) && (t == 0)) {
-        C.writePDB(op.getString("t") + "position4" + ".pdb");
+      if (op.isGiven("t")) {
+        W.writePDB(op.getString("t") + "position5" + to_string(d) + ".pdb");
       }
 
-      // rotate CA randomly along the x, y, and z axes, if no binding residues given for A, or limited to prevent A's binding residues from facing too far away from B if binding residues specified
+      // rotate B randomly using Fast Random Rotation Matrixes
 
-      if (!op.isGiven("q")) {
-        mstreal xaAngle = MstUtils::randUnit(0,360);
-        Transform TXA = TransformFactory::rotateAroundX(xaAngle);
-        TXA.apply(CA);
-        mstreal yaAngle = MstUtils::randUnit(0,360);
-        Transform TYA = TransformFactory::rotateAroundY(yaAngle);
-        TYA.apply(CA);
-        mstreal zaAngle = MstUtils::randUnit(0,360);
-        Transform TZA = TransformFactory::rotateAroundZ(zaAngle);
-        TZA.apply(CA);
+      Transform randRot = getRandRotOrient();
+      randRot.apply(B);
 
         //position 5
-        if ((op.isGiven("t")) && (t == 0)) {
-          C.writePDB(op.getString("t") + "position5" + ".pdb");
-        }
-      }
-
-      // rotate CB randomly along the x, y, and z axes
-
-      mstreal xbAngle = MstUtils::randUnit(0,360);
-      Transform TXB = TransformFactory::rotateAroundX(xbAngle);
-      TXB.apply(CB);
-      mstreal ybAngle = MstUtils::randUnit(0,360);
-      Transform TYB = TransformFactory::rotateAroundY(ybAngle);
-      TYB.apply(CB);
-      mstreal zbAngle = MstUtils::randUnit(0,360);
-      Transform TZB = TransformFactory::rotateAroundZ(zbAngle);
-      TZB.apply(CB);
-
-      //position 6
       if ((op.isGiven("t")) && (t == 0)) {
-        C.writePDB(op.getString("t") + "position6" + ".pdb");
+          W.writePDB(op.getString("t") + "position6" + ".pdb");
       }
 
-      // make standard deviations for random translations in the Y & Z directions, based on the Y & Z lengths of CB - if binding residues are given for a
+      // generate a random unit vector to pull B away by - if limiting binding angles between binding partners, implement that when getting polCos (the cosine of the polar angle is pre-computed above!)
 
-      if (((op.isGiven("al")) || (op.isGiven("abm"))) && op.isGiven("q")) {
+      polCos = MstUtils::randUnit(intAnegLim,intAposLim);
+      polSin = sqrt(1 - (polCos*polCos));
 
-        ProximitySearch::calculateExtent(CAbinderAtoms,axLow,ayLow,azLow,axHigh,ayHigh,azHigh);
-        ayExtent = ayHigh - ayLow;
-        azExtent = azHigh - azLow;
+      randAz = MstUtils::randUnit(0,2*M_PI);
+      randX = polSin * cos(randAz);
+      randY = polSin * sin(randAz);
+      randZ = polCos;
+      
+      /*
+      randX = MstUtils::randNormal(0,1.0);
+      while ((randX < -1.0) || (randX > 1.0)) {
+        randX = MstUtils::randNormal(0,1.0);
+      }
+      mstreal randY = MstUtils::randNormal(0,1.0);
+      while ((randY < -1.0) || (randY > 1.0)) {
+        randY = MstUtils::randNormal(0,1.0);
+      }
+      mstreal randZ = MstUtils::randNormal(0,1.0);
+      while ((randZ < -1.0) || (randZ > 1.0)) {
+        randZ = MstUtils::randNormal(0,1.0);
+      }
+      mstreal denom = sqrt((randX*randX) + (randY*randY) + (randZ*randZ));
+      mstreal randXstepScale = randX/denom;
+      mstreal randYstepScale = randY/denom;
+      mstreal randZstepScale = randZ/denom;*/
 
-        ProximitySearch::calculateExtent(CBatoms,bxLow,byLow,bzLow,bxHigh,byHigh,bzHigh);
-        byExtent = byHigh - byLow;
-        bzExtent = bzHigh - bzLow;
+      // sort the atom pointers of B according to the largest value out of randX / randY /randZ, so you can check them intelligently along the vector it's being most pulled out along
 
-        //ProximitySearch::calculateExtent(CBbinderAtoms,bxLow,byLow,bzLow,bxHigh,byHigh,bzHigh);
-        //byExtent = byHigh - byLow;
-        //bzExtent = bzHigh - bzLow;
-
-        //mstreal yLowExtent = std::min(byExtent, ayExtent);
-        //mstreal zLowExtent = std::min(bzExtent, azExtent);
-        //mstreal ySig = (1.0 / 6.0) * yLowExtent;
-        //mstreal zSig = (1.0 / 6.0) * zLowExtent;
-
-
-        //mstreal yRand = MstUtils::randNormal(0,yLowExtent);
-        //mstreal zRand = MstUtils::randNormal(0,zLowExtent);
-        
-        //mstreal yRand = MstUtils::randNormal(0,(1.0 / 6.0) * (ayExtent + byExtent));
-        //mstreal zRand = MstUtils::randNormal(0,(1.0 / 6.0) * (azExtent + bzExtent));
-        
-        mstreal yRand = MstUtils::randUnit(0,(1.0 / 2.0) * (ayExtent + byExtent));
-        mstreal zRand = MstUtils::randUnit(0,(1.0 / 2.0) * (azExtent + bzExtent));
-
-
-        // use those to randomly translate CB in the Y & Z axes so that the angle of binding can vary, with a normal distribution with standard deviation of 1/6 the distance between the furthest Y points / Z points (so 1/3 the distance from the middle and furthest Y / Z point, which means 0.13% will be beyond the range of being able to connect, which is fine)
-
-        for (int a = 0; a < CBatoms.size(); a++) {
-          mstreal yStart = CBatoms[a]->getY();
-          CBatoms[a]->setY(yStart + yRand);
-          mstreal zStart = CBatoms[a]->getZ();
-          CBatoms[a]->setZ(zStart + zRand);
-        }
-
-        //position 7
-        if ((op.isGiven("t")) && (t == 0)) {
-          C.writePDB(op.getString("t") + "position7" + ".pdb");
-        }
-
-        // if there are B binder atoms, check if they're outside the Y or Z ranges of the A binder atoms, and so could never meet; go back to start without attempting to dock if so
-
-        if (op.isGiven("bl")) {
-
-          ProximitySearch::calculateExtent(CBbinderAtoms,bxLow,byLow,bzLow,bxHigh,byHigh,bzHigh);
-          
-          if ((byLow > ayHigh) || (byHigh < ayLow) || (bzLow > azHigh) || (bzHigh < azLow)) {
-            continue;
+      /*
+      char maxAbsAxis;
+      int negatorInt;
+      if (abs(randX) > abs(randY)) {
+        if (abs(randX) > abs(randZ)) {
+          maxAbsAxis = 'X';
+          if (randX <= 0) {
+            negatorInt = -1;
+          }
+          else {
+            negatorInt = 1;
           }
         }
-
-        // if limiting binding angles between binding partners, check what the binding angle is, and go back to start if outside the limits 
-
-        if (op.isGiven("limA")) {
-          CartesianPoint geoCenterB = CBatoms.getGeometricCenter();
-          CartesianPoint geoCenterBbinders = CBbinderAtoms.getGeometricCenter();
-          CartesianPoint geoCenterBprime(geoCenterB.getX() - 10, geoCenterB.getY(), geoCenterB.getZ());
-          angleOff = CartesianGeometry::angle(geoCenterBprime,geoCenterB,geoCenterBbinders);
-          if (angleOff > stoi(op.getString("limA"))) {
-            continue;
+        else {
+          maxAbsAxis = 'Z';
+          if (randZ < 0) {
+            negatorInt = -1;
+          }
+          else {
+            negatorInt = 1;
           }
         }
-      }
-
-      // set up proximity search with A, since B will be the partner moving (if you move an object you need to re-make a prox-search or it won't work / will segfault)
-
-      ProximitySearch ps;
-
-      if (op.isGiven("dq")) {
-        ps = ProximitySearch(CAbbAtoms, 15);
-      }
+      } 
       else {
-        ps = ProximitySearch(CAatoms, 15);
+        if (abs(randY) > abs(randZ)) {
+          maxAbsAxis = 'Y';
+          if (randY < 0) {
+            negatorInt = -1;
+          }
+          else {
+            negatorInt = 1;
+          }
+        }
+        else {
+          maxAbsAxis = 'Z';
+          if (randZ < 0) {
+            negatorInt = -1;
+          }
+          else {
+            negatorInt = 1;
+          }
+        }
       }
 
-      // for DOCKQ
-      ProximitySearch psDQ1(CAatoms, 15);
+      
+      vector<tuple<mstreal,Atom*>> axSortBatomsTuple;
+      AtomPointerVector axSortBatoms;
+      for (int axi = 0; axi < Batoms.size(); axi++) {
 
-      // and a proximity search with just A's CA binding residues - this is a ProximitySearch*
+        Atom* currAtomCheck = Batoms[axi];
+        mstreal currAxval;
 
-      ProximitySearch ps2(CAbinderAtoms, 15);
+        if (maxAbsAxis == 'X') {
+          currAxval = currAtomCheck->getX() * negatorInt;
+        }
+        if (maxAbsAxis == 'Y') {
+          currAxval = currAtomCheck->getY() * negatorInt;
+        }
+        if (maxAbsAxis == 'Z') {
+          currAxval = currAtomCheck->getZ() * negatorInt;
+        }
+        
+        axSortBatomsTuple.push_back(std::make_tuple(currAxval,currAtomCheck));
+      }
+      sort(axSortBatomsTuple.begin(), axSortBatomsTuple.end());
+      for (int axi = 0; axi < Batoms.size(); axi++) {
+        axSortBatoms.push_back(get<1>(axSortBatomsTuple[axi]));
+      }*/
 
       // while a proper docked stage has not been reached, but there are still opporunitites for success
 
@@ -947,175 +999,270 @@ int main(int argc, char** argv) {
       recentClashes.resize(0);
 
       mstreal contactsCount;
-      mstreal xRand;
+      mstreal zRand;
 
       while ((absoluteSuccess == false) && (absoluteFailure == false)) {
 
         // reset current clashes to be empty
-        currClashes.resize(0);
+        //currClashes.resize(0);
 
         // pull B atoms out along the X axis, in small steps with a normal distrubtion of ~1.0 angstrom and mew of 0, except always positive so it's pulling away from A - can try variations on the 1.0 and adjust
 
-        xRand = fabs(MstUtils::randNormal(0,normalDistBase));
+        mstreal randStep = abs(MstUtils::randNormal(0,normalDistBase));
 
-        for (int a = 0; a < CBatoms.size(); a++) {
-          mstreal xStart = CBatoms[a]->getX();
-          CBatoms[a]->setX(xStart + xRand);
+        for (int aa = 0; aa < Batoms.size(); aa++) {
+            Atom* currAtom = Batoms[aa];
+            mstreal xStart = currAtom->getX();
+            currAtom->setX(xStart + (randX*randStep));
+            mstreal yStart = currAtom->getY();
+            currAtom->setY(yStart + (randY*randStep));
+            mstreal zStart = currAtom->getZ();
+            currAtom->setZ(zStart + (randZ*randStep));
         }
 
         //position 8
         if (op.isGiven("t") && (t == 0)) {
-          C.writePDB(op.getString("t") + "position8" + ".pdb");
+          W.writePDB(op.getString("t") + "position7" + ".pdb");
         }
 
         // reject / continue depending on if there are too many clashes or not
 
         int clashCount = 0;
         currClashes.resize(0);
+        currClashIndexes.resize(0);
 
-        // first check positions in B that previously had clashes...
+        // first check positions in B that previously had clashes... recentClashes holds Atom*s and their index numbers in Batoms, for atoms in B that clashed previously
 
-        for (int a = 0; a < recentClashes.size(); a++) {
-          int currBcheck = recentClashes[a];
-          Atom* currBatom = CBatoms[currBcheck];
+        for (int aa = 0; aa < recentClashes.size(); aa++) {
+          Atom* currBatom = recentClashes[aa];
           CartesianPoint currBcoor = currBatom->getCoor();
-          vector <int> currClashPts = ps.getPointsWithin(currBcoor, 0, clashDistance, false);
+          vector <int> currClashPts = psBB.getPointsWithin(currBcoor, 0, clashDistance, false);
           int currBsize = currClashPts.size();
+
           if (currBsize > 0) {
-            currClashes.push_back(currBcheck);
+            currClashes.push_back(currBatom);
+            currClashIndexes.push_back(recentClashIndexes[aa]);
             clashCount+=currBsize;
           }
+
           if (clashCount > clashesAllowed) {
             break;
           }
         }
 
         if (clashCount > clashesAllowed) {
-          recentClashes = currClashes;
           continue;
         }
 
-        // then if you're not over the clash limit, check the rest of the valid residues
+        // then if you're not over the clash limit, check the rest of the valid residues, and add to recentClashes
+        
+        int a;
+        backNforth = 0;
+        if (recentClashIndexes.size() > 0) {
+          a = recentClashIndexes.back() + 1;
+        }
+        else {
+          a = floor(BbbAtoms.size() / 2);
+        }
 
-        for (int a = 0; a < CBatoms.size(); a++) {
-          int currBcheck = a;
-          if (std::find(recentClashes.begin(), recentClashes.end(), currBcheck) != recentClashes.end()) {
-            continue; // don't double-count if already checked as part of recent clashes
+        while ((a > 0) and (a < BbbAtoms.size() - 1)) { //a goes back n forth around the most recent clashes to check nearby atoms, or if no recent clashes, starts in the middle then goes back n forth
+
+          a += backNforth;
+
+          if (backNforth > 0) {
+            backNforth = (backNforth + 1)*-1;
+          }
+          else if (backNforth < 0) {
+            backNforth = (backNforth - 1)*-1;
+          }
+          else {
+            backNforth += 1;
           }
 
-          Atom* currBatom = CBatoms[currBcheck];
+          if (std::find(recentClashIndexes.begin(), recentClashIndexes.end(), a) != recentClashIndexes.end()) {
+            continue; // don't double-check, if already checked above!
+          }
+
+          Atom* currBatom = BbbAtoms[a];
           CartesianPoint currBcoor = currBatom->getCoor();
-          vector <int> currClashPts = ps.getPointsWithin(currBcoor, 0, clashDistance, false);
+          vector <int> currClashPts = psBB.getPointsWithin(currBcoor, 0, clashDistance, false);
           int currBsize = currClashPts.size();
           if (currBsize > 0) {
-            currClashes.push_back(currBcheck);
+            currClashes.push_back(currBatom);
+            currClashIndexes.push_back(a);
             clashCount+=currBsize;
           }
+
           if (clashCount > clashesAllowed) {
             break;
           }
         }
 
+        if ((clashCount <= clashesAllowed) && (a > 0)) { // if still few clashes, and the "end" of the atompointervector was hit, but the start of it still needs to be reached...
+          
+          if (a >= BbbAtoms.size()) {
+            a = BbbAtoms.size() - 1;
+          }
+
+          //a is currently = Batoms.size() - 1, aka the last index; backNforth is negative
+
+          a += backNforth;
+
+          while (a >= 0) {
+
+            if (std::find(recentClashIndexes.begin(), recentClashIndexes.end(), a) != recentClashIndexes.end()) {
+              a--;
+              continue; // don't double-check, if already checked above!
+            }
+
+            Atom* currBatom = BbbAtoms[a];
+            CartesianPoint currBcoor = currBatom->getCoor();
+            vector <int> currClashPts = psBB.getPointsWithin(currBcoor, 0, clashDistance, false);
+            int currBsize = currClashPts.size();
+            if (currBsize > 0) {
+              currClashes.push_back(currBatom);
+              currClashIndexes.push_back(a);
+              clashCount+=currBsize;
+            }
+            if (clashCount > clashesAllowed) {
+              break;
+            }
+            a--;
+          }
+        }
+
+        if ((clashCount <= clashesAllowed) && (a < BbbAtoms.size())) { // if still few clashes, and the "start" of the atompointervector was hit, but the end of it still needs to be reached...
+
+          if (a < 0) {
+            a = 0;
+          }
+
+          //a is currently = 0, aka the first index; backNforth is positive
+          a += backNforth;
+
+          while (a < BbbAtoms.size()) {
+
+            if (std::find(recentClashIndexes.begin(), recentClashIndexes.end(), a) != recentClashIndexes.end()) {
+              a++;
+              continue; // don't double-check, if already checked above!
+            }
+
+            Atom* currBatom = BbbAtoms[a];
+            CartesianPoint currBcoor = currBatom->getCoor();
+            vector <int> currClashPts = psBB.getPointsWithin(currBcoor, 0, clashDistance, false);
+            int currBsize = currClashPts.size();
+            if (currBsize > 0) {
+              currClashes.push_back(currBatom);
+              currClashIndexes.push_back(a);
+              clashCount+=currBsize;
+            }
+            if (clashCount > clashesAllowed) {
+              break;
+            }
+            a++;
+          }
+        }
+
+        //change recentClashes to hold the value of currClashes, and the same for their respective indexes
+
+        recentClashes.resize(0);
+        recentClashIndexes.resize(0);
+        for (int r = 0; r < currClashes.size(); r++) {
+          recentClashes.push_back(currClashes[r]);
+          recentClashIndexes.push_back(currClashIndexes[r]);
+        }
+
         if (clashCount > clashesAllowed) {
-          recentClashes = currClashes;
           continue;
         }
 
         //position 9
         if (op.isGiven("t") && (t == 0)) {
-          C.writePDB(op.getString("t") + "position9" + ".pdb");
+          W.writePDB(op.getString("t") + "position8" + ".pdb");
         }
 
         // we've only reached this point if there are an aceeptable number of clashes, so accept if there are at least the required number of contacts - possibly limited by antibody binding mode, a binding residues, and/or b binding residues
 
-        contactsCount = 0;
-        vector<pair<Residue*,Residue*>> pastContacts = {};
+        if (op.isGiven("i")) {
 
-        for (int a = 0; a < bPossibleContacts.size(); a++) { // go over all CA atoms in B possible to be part of contacts
-          int currBcheck = bPossibleContacts[a];
-          Residue* currBres = CBatoms[currBcheck]->getParent();
-          CartesianPoint currBcoor = CBatoms[currBcheck]->getCoor();
-          vector <int> currContactPts = ps2.getPointsWithin(currBcoor, 0.0, contactDistance, false); // ps2 is only checking for CA atoms in A possible to be part of contacts
-          if (op.isGiven("dq")) {
-            for (int aa = 0; aa < currContactPts.size(); aa++) {
-            Residue* currAres = CAbinderAtoms[currContactPts[aa]]->getParent();
-            if (std::find(pastContacts.begin(), pastContacts.end(), make_pair(currBres,currAres)) != pastContacts.end()) {
-              continue;
-            }
-            else {
-              pastContacts.push_back(make_pair(currBres,currAres));
-              contactsCount += 1;
-            }
-          }
-          }
-          else {
+          contactsCount = 0;
+          for (int b = 0; b < BbinderAtoms.size(); b++) { // go over all CA atoms in B possible to be part of contacts
+
+            Atom* currBatom = BbinderAtoms[b];
+            CartesianPoint currBcoor = currBatom->getCoor();
+            vector <int> currContactPts = psAbinders.getPointsWithin(currBcoor, 0.0, contactDistance, false); // find all CA atoms in A it's in conract with
             contactsCount += currContactPts.size();
+
+            if (contactsCount >= contactsRequired) {
+              absoluteSuccess = true;
+              break;
+            }
           }
-          if (contactsCount >= contactsRequired) {
-            absoluteSuccess = true;
-            break;
+          if (contactsCount < contactsRequired) {
+            absoluteFailure = true;
           }
         }
-
-        //check if all atoms in CB are further positive than all atoms in CA by over 8 angstroms... b/c if so the docking is irrecoverable
-
-        ProximitySearch::calculateExtent(CB,xLow,yLow,zLow,xHigh,yHigh,zHigh);
-        mstreal bX = xLow;
-        ProximitySearch::calculateExtent(CA,xLow,yLow,zLow,xHigh,yHigh,zHigh);
-        mstreal aX = xHigh;
-
-        if (bX - aX > 8.0) {
-          absoluteFailure = true;
+        else {
+          absoluteSuccess = true;
         }
       }
 
       if (absoluteFailure) {
         fails++;
-        if (op.isGiven("t") && (t2 == 0)) {
-          C.writePDB(op.getString("t") + "position11_failedWithContacts" + to_string(contactsCount) + ".pdb");
-          t2++;
+        if (op.isGiven("t")) {
+          W.writePDB(op.getString("t") + "position9_failedWithContacts" + to_string(contactsCount) + ".pdb");
         }
         continue;
       }
       else {
-        d++; // accepted! :D
-        if (op.isGiven("t") && (t2 == 0)) {
-          C.writePDB(op.getString("t") + "position11_succeededWithContacts" + to_string(contactsCount) + ".pdb");
-          t2++;
+        d++; // accepted! :M
+
+        if (op.isGiven("t")) {
+          W.writePDB(op.getString("t") + "dock" + to_string(d) + "withCon" + to_string(contactsCount) + ".pdb");
+        }
+
+        if (op.isGiven("pbs")) {
+          B.writePDB(op.getString("pbs") + to_string(d) + "dock.pdb");
         }
       }
 
-      if (d%10000 == 0) {
+      /*if (d%10000 == 0) {
         cout << d << " total docks accepted..." << endl;
-      }
+      }*/
 
       // for those accepted, compare to the correct structure to calculate the RMSD
 
       mstreal simulatedRealRMSDorDOCKQ;
 
       if (op.isGiven("r")) {
-        rc.align(CA.getAtoms(),realAtomsCA,C);
+        rc.align(Aatoms,realAtomsTA,W);
         if (op.isGiven("t") && (t == 0)) {
-          C.writePDB(op.getString("t") + "Cposition12.pdb");
-          CAC.writePDB(op.getString("t") + "CACposition12.pdb");
+          W.writePDB(op.getString("t") + "Tposition10.pdb");
+          TACopy.writePDB(op.getString("t") + "TAposition10.pdb");
         }
-        mstreal bRMSD = rc.rmsd(CB.getAtoms(),realAtomsCB); // gets RMSD without alignment
-        rc.align(CB.getAtoms(),realAtomsCB,C); // aligns CB with the original location of CB, but transforms the whole structure C
+        mstreal bRMSD = rc.rmsd(Batoms,realAtomsTB); // gets RMSD without alignment
+        rc.align(Batoms,realAtomsTB,W); // aligns B with the original location of B, but transforms the whole structure W
         if (op.isGiven("t") && (t == 0)) {
-          C.writePDB(op.getString("t") + "Cposition13.pdb");
-          CBC.writePDB(op.getString("t") + "CBCposition13.pdb");
+          W.writePDB(op.getString("t") + "Tposition11.pdb");
+          TBCopy.writePDB(op.getString("t") + "CBTposition11.pdb");
         }
-        mstreal aRMSD = rc.rmsd(CA.getAtoms(),realAtomsCA); // gets RMSD without alignment
+        mstreal aRMSD = rc.rmsd(Aatoms,realAtomsTA); // gets RMSD without alignment
         simulatedRealRMSDorDOCKQ = (aRMSD + bRMSD);
+
+        if (op.isGiven("t")) {
+          if (simulatedRealRMSDorDOCKQ < 5) {
+            W.writePDB(op.getString("t") + "lowDock" + to_string(simulatedRealRMSDorDOCKQ) + ".pdb");
+          }
+        }
 
         if (op.isGiven("mbl")) {
           for (int abl = 0; abl < altBindingLocsAonly.size(); abl++) { // altBindingLocs is a list of atom lists representing alternative complex conformations
 
             AtomPointerVector altBindingAtoms = altBindingLocsAonly[abl];
-            mstreal aaRMSD = rc.rmsd(CA.getAtoms(),altBindingAtoms); // gets RMSD without alignment - because C's already aligned by origianl location of CB
+            mstreal aaRMSD = rc.rmsd(Aatoms,altBindingAtoms); // gets RMSD without alignment - because W's already aligned by origianl location of B
 
-            rc.align(CA.getAtoms(),altBindingAtoms,C); // aligns CA with the alt original location of CA, but transforms the whole structure C
-            mstreal abRMSD = rc.rmsd(CB.getAtoms(),realAtomsCB); // gets RMSD without alignment
+            rc.align(Aatoms,altBindingAtoms,W); // aligns A with the alt original location of A, but transforms the whole structure W
+            mstreal abRMSD = rc.rmsd(Batoms,realAtomsTB); // gets RMSD without alignment
 
             mstreal bestArmsd = min(aaRMSD, aRMSD);
             mstreal bestBrmsd = min(abRMSD, bRMSD);
@@ -1137,11 +1284,11 @@ int main(int argc, char** argv) {
       else if (op.isGiven("dq")) {
 
         if (op.isGiven("t")) {
-          cout << "testing CAbbAtoms[0]" << CAbbAtoms[0] << endl;
-          cout << "testing getBBatoms(CA.getAtoms())[0]" << getBBatoms(CA.getAtoms())[0] << endl;
+          cout << "testing AbbAtoms[0]" << AbbAtoms[0] << endl;
+          cout << "testing getBBatoms(Aatoms)[0]" << getBBatoms(Aatoms)[0] << endl;
         }
 
-        mstreal currDOCKQ = getDOCKQ(&C, &CA, CAbbAtoms, &CB, CBbbAtoms, realAtomsCA, realAtomsCAbb, realAtomsCB, realAtomsCBbb, abResCons, conSize, a10interfaceIndexesBB, b10interfaceIndexesBB, ab10interface, rc, psDQ1);
+        mstreal currDOCKQ = getDOCKQ(&W, &A, AbbAtoms, &B, BbbAtoms, realAtomsTA, realAtomsCAbb, realAtomsTB, realAtomsCBbb, abResCons, conSize, a10interfaceIndexesBB, b10interfaceIndexesBB, ab10interface, rc, psDQ);
         simulatedRealRMSDorDOCKQ = currDOCKQ;
 
         if (op.isGiven("t")) {
@@ -1150,12 +1297,12 @@ int main(int argc, char** argv) {
         if (op.isGiven("mbl")) {
           for (int abl = 0; abl < altBindingLocsAonly.size(); abl++) { // altBindingLocs is a list of atom lists representing alternative complex conformations
 
-            mstreal altDOCKQ = getDOCKQ(&C, &CA, CAbbAtoms, &CB, CBbbAtoms, altBindingLocsAonly[abl], altBindingLocsAbbOnly[abl], realAtomsCB, realAtomsCBbb, abResConsAlts[abl], conSizeAlts[abl], a10interfaceIndexesBBAlts[abl], b10interfaceIndexesBBAlts[abl], ab10interfaceAlts[abl], rc, psDQ1);
+            mstreal altDOCKQ = getDOCKQ(&W, &A, AbbAtoms, &B, BbbAtoms, altBindingLocsAonly[abl], altBindingLocsAbbOnly[abl], realAtomsTB, realAtomsCBbb, abResConsAlts[abl], conSizeAlts[abl], a10interfaceIndexesBBAlts[abl], b10interfaceIndexesBBAlts[abl], ab10interfaceAlts[abl], rc, psDQ);
             if (op.isGiven("t")) {
               cout << "altDOCKQ was: " << altDOCKQ << endl;
               cout << "altBindingLocsAonly[abl][0] was: " << altBindingLocsAonly[abl][0] << endl;
-              cout << "realAtomsCA[0] was: " << realAtomsCA[0] << endl;
-              cout << "*realAtomsCA[0] was: " << *realAtomsCA[0] << endl;
+              cout << "realAtomsTA[0] was: " << realAtomsTA[0] << endl;
+              cout << "*realAtomsTA[0] was: " << *realAtomsTA[0] << endl;
             }
             if (altDOCKQ > simulatedRealRMSDorDOCKQ) {
               simulatedRealRMSDorDOCKQ = altDOCKQ;
@@ -1168,7 +1315,7 @@ int main(int argc, char** argv) {
       }
 
       else {
-        AtomPointerVector Catoms = C.getAtoms();
+        AtomPointerVector Catoms = W.getAtoms();
         simulatedRealRMSDorDOCKQ = rc.bestRMSD(Catoms,realAtoms);
 
         if (op.isGiven("t")) {
@@ -1199,10 +1346,7 @@ int main(int argc, char** argv) {
 
       if (op.isGiven("t")) {
         if (t < 10) {
-          C.writePDB(op.getString("t") + "position11_succeededWithContacts" + to_string(contactsCount) + to_string(t) + ".pdb");
-          //cout << "angleOff was: " << endl;
-          //cout << angleOff << endl;
-          t++;
+          W.writePDB(op.getString("t") + "position9_succeededWithContacts" + to_string(contactsCount) + to_string(t) + ".pdb");
         }
       }
     }
@@ -1237,23 +1381,23 @@ int main(int argc, char** argv) {
 
   if (op.isGiven("r")) {
     if (op.isGiven("t")) {
-      mstreal OLDbRMSD = rc.rmsd(DB.getAtoms(),realAtomsCB); // gets RMSD without alignment
+      mstreal OLDbRMSD = rc.rmsd(MBheavy.getAtoms(),realAtomsTB); // gets RMSD without alignment
       cout << "testing OLDbRMSD: " << OLDbRMSD << endl;
     }
-    rc.align(DA.getAtoms(),realAtomsCA,D); // aligns DA with the original location of CA, but transforms the whole structure D - if I'm doing this right lol
+    rc.align(MAheavy.getAtoms(),realAtomsTA,M); // aligns MAheavy with the original location of A, but transforms the whole structure M - if I'm doing this right lol
     if (op.isGiven("t")) {
-      DA.writePDB(op.getString("t") + "DAposition14.pdb");
-      CAC.writePDB(op.getString("t") + "CACposition14.pdb");
-      D.writePDB(op.getString("t") + "Dposition14.pdb");
-      CC.writePDB(op.getString("t") + "CCposition14.pdb");
+      MAheavy.writePDB(op.getString("t") + "MAposition14.pdb");
+      TACopy.writePDB(op.getString("t") + "TAposition14.pdb");
+      M.writePDB(op.getString("t") + "Mposition14.pdb");
+      Tcopy.writePDB(op.getString("t") + "CTposition14.pdb");
     }
-    mstreal bRMSD = rc.rmsd(DB.getAtoms(),realAtomsCB); // gets RMSD without alignment
-    rc.align(DB.getAtoms(),realAtomsCB,D); // aligns CB with the original location of CB, but transforms the whole structure C - if I'm doing this right lol
+    mstreal bRMSD = rc.rmsd(MBheavy.getAtoms(),realAtomsTB); // gets RMSD without alignment
+    rc.align(MBheavy.getAtoms(),realAtomsTB,M); // aligns B with the original location of B, but transforms the whole structure W - if I'm doing this right lol
     if (op.isGiven("t")) {
-      D.writePDB(op.getString("t") + "Dposition15.pdb");
-      CC.writePDB(op.getString("t") + "CCposition15.pdb");
+      M.writePDB(op.getString("t") + "Mposition15.pdb");
+      Tcopy.writePDB(op.getString("t") + "CTposition15.pdb");
     }
-    mstreal aRMSD = rc.rmsd(DA.getAtoms(),realAtomsCA); // gets RMSD without alignment
+    mstreal aRMSD = rc.rmsd(MAheavy.getAtoms(),realAtomsTA); // gets RMSD without alignment
     comparisonRMSDorDOCKQ = (aRMSD + bRMSD);
 
     if (op.isGiven("t")) {
@@ -1266,10 +1410,10 @@ int main(int argc, char** argv) {
       for (int abl = 0; abl < altBindingLocsAonly.size(); abl++) { // altBindingLocs is a list of atom lists representing alternative complex conformations
 
         AtomPointerVector altBindingAtoms = altBindingLocsAonly[abl];
-        mstreal altcomparisonRMSDorDOCKQa = rc.rmsd(DA.getAtoms(),altBindingAtoms); // gets RMSD without alignment
+        mstreal altcomparisonRMSDorDOCKQa = rc.rmsd(MAheavy.getAtoms(),altBindingAtoms); // gets RMSD without alignment
 
-        rc.align(DA.getAtoms(),altBindingAtoms,D); // aligns CA with the alt original location of CA, but transforms the whole structure C
-        mstreal altcomparisonRMSDorDOCKQb = rc.rmsd(DB.getAtoms(),realAtomsCB); // gets RMSD without alignment
+        rc.align(MAheavy.getAtoms(),altBindingAtoms,M); // aligns A with the alt original location of A, but transforms the whole structure W
+        mstreal altcomparisonRMSDorDOCKQb = rc.rmsd(MBheavy.getAtoms(),realAtomsTB); // gets RMSD without alignment
 
         mstreal bestArmsdComp = min(altcomparisonRMSDorDOCKQa, aRMSD);
         mstreal bestBrmsdComp = min(altcomparisonRMSDorDOCKQb, bRMSD);
@@ -1296,12 +1440,12 @@ int main(int argc, char** argv) {
 
     cout << "getting DOCKQ between crystal structure and model..." << endl;
 
-    comparisonRMSDorDOCKQ = getDOCKQ(&D, &DA, DAbbAtoms, &DB, DBbbAtoms, realAtomsCA, realAtomsCAbb, realAtomsCB, realAtomsCBbb, abResCons, conSize, a10interfaceIndexesBB, b10interfaceIndexesBB, ab10interface, rc, psDQ2);
+    comparisonRMSDorDOCKQ = getDOCKQ(&M, &MAheavy, MAbbAtoms, &MBheavy, MBbbAtoms, realAtomsTA, realAtomsCAbb, realAtomsTB, realAtomsCBbb, abResCons, conSize, a10interfaceIndexesBB, b10interfaceIndexesBB, ab10interface, rc, psDQ2);
 
       if (op.isGiven("mbl")) {
       for (int abl = 0; abl < altBindingLocsAonly.size(); abl++) {
 
-        mstreal altcomparisonRMSDorDOCKQ = getDOCKQ(&D, &DA, DAbbAtoms, &DB, DBbbAtoms, altBindingLocsAonly[abl], altBindingLocsAbbOnly[abl], realAtomsCB, realAtomsCBbb, abResConsAlts[abl], conSizeAlts[abl], a10interfaceIndexesBBAlts[abl], b10interfaceIndexesBBAlts[abl], ab10interfaceAlts[abl], rc, psDQ2); 
+        mstreal altcomparisonRMSDorDOCKQ = getDOCKQ(&M, &MAheavy, MAbbAtoms, &MBheavy, MBbbAtoms, altBindingLocsAonly[abl], altBindingLocsAbbOnly[abl], realAtomsTB, realAtomsCBbb, abResConsAlts[abl], conSizeAlts[abl], a10interfaceIndexesBBAlts[abl], b10interfaceIndexesBBAlts[abl], ab10interfaceAlts[abl], rc, psDQ2); 
         if (op.isGiven("t")) {
           cout << "real comparisonRMSDorDOCKQ was: " << comparisonRMSDorDOCKQ << endl;
           cout << "real altcomparisonRMSDorDOCKQ was: " << altcomparisonRMSDorDOCKQ << endl;
@@ -1319,7 +1463,7 @@ int main(int argc, char** argv) {
   }
 
   else {
-    AtomPointerVector Datoms = D.getAtoms();
+    AtomPointerVector Datoms = M.getAtoms();
     comparisonRMSDorDOCKQ = rc.bestRMSD(realAtoms,Datoms);
 
     if (op.isGiven("t")) {
@@ -1364,7 +1508,12 @@ int main(int argc, char** argv) {
     }
   }
   else {
-    cout << "RMSD between correct structure & structure to evaluate was: " << comparisonRMSDorDOCKQ << endl;
+    if (op.isGiven("r")) {
+      cout << "R+L RMSD between correct structure & structure to evaluate was: " << comparisonRMSDorDOCKQ << endl;
+    }
+    else {
+      cout << "complex RMSD between correct structure & structure to evaluate was: " << comparisonRMSDorDOCKQ << endl;
+    }
 
     sort(rmsdList.begin(), rmsdList.end());
     for (int i = 0; i < rmsdList.size(); i++) {
@@ -1395,7 +1544,5 @@ int main(int argc, char** argv) {
     outFile << rmsdList[i] << "\n";
   }
   outFile.close();
-
-  cout << "testing" << endl;
   return(0);
 }

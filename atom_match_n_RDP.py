@@ -12,23 +12,25 @@ import os
 import subprocess
 
 parser = argparse.ArgumentParser()
-parser.add_argument("-a", dest="a", required=True, help="the path to the true complex structure")
-parser.add_argument("-b", dest="b", required=True, help="the path to the model complex structure")
-parser.add_argument("-a1", dest="a1", required=False, help="the chains making up the first docking partner out of two; if there are multiple binding locations for one of the partners, this must be that partner. If antibody-binding-mode RDP is being run, this must be the antibody. Enter chains separated by commas, with alternate binding locations specified by colons (e.g a two-chain partner with multiple binding locations, either chains A&B or C&D, would be entered like 'A:C,B:D'. If there are only two chains in the crystal structure, -a1 and -a2 are not necessary; if there are multiple chains you can only provide one and all other chains will be presumed to go to the other flag.")
-parser.add_argument("-a2", dest="a2", required=False, help="the chains making up the second docking partner out of two; if there are multiple binding locations for one of the partners, this cannot be that partner. If antibody-binding-mode RDP is being run, this must be the antigen. Enter chains split by ',' (e.g a two-chain partner would be entered like 'E,F'. If there are only two chains in the crystal structure, -a1 and -a2 are not necessary; if there are multiple chains you can only provide one and all other chains will be presumed to go to the other flag.")
-parser.add_argument("-m", dest="m", required=True, help="the underlying distance metric used for the distribution the P-value is taken from; accepts 'c' for complex RMSD, 'r' for receptor + ligand RMSD, and 'dq' for DOCKQ. R+L RMSD is the default.")
+parser.add_argument("-t", dest="t", required=True, help="the path to the true complex structure")
+parser.add_argument("-m", dest="m", required=True, help="the path to the model complex structure")
+parser.add_argument("-ta", dest="ta", required=False, help="the chains making up the first docking partner out of two; if there are multiple binding locations for one of the partners, this must be that partner. If antibody-binding-mode RDP is being run, this must be the antibody. Enter chains separated by commas, with alternate binding locations specified by colons (e.g a two-chain partner with multiple binding locations, either chains A&B or C&D, would be entered like 'A:C,B:D'. If there are only two chains in the crystal structure, -ta and -tb are not necessary; if there are multiple chains you can only provide one and all other chains will be presumed to go to the other flag.")
+parser.add_argument("-tb", dest="tb", required=False, help="the chains making up the second docking partner out of two; if there are multiple binding locations for one of the partners, this cannot be that partner. If antibody-binding-mode RDP is being run, this must be the antigen. Enter chains split by ',' (e.g a two-chain partner would be entered like 'E,F'. If there are only two chains in the crystal structure, -ta and -tb are not necessary; if there are multiple chains you can only provide one and all other chains will be presumed to go to the other flag.")
+parser.add_argument("-d", dest="d", required=True, help="the underlying distance metric used for the distribution the P-value is taken from; accepts 'c' for complex RMSD, 'r' for receptor + ligand RMSD, and 'dq' for DOCKQ. R+L RMSD is the default.")
 parser.add_argument("-o", dest="o", required=True, help="the out path for the text file containing the RDP results'")
 parser.add_argument("-ml", dest="ml", required=False, help="the path to MST's lib subdir, like '/path/to/MST/lib'; not required if the library path is where it's supposed to be, as the makefile will save the path and this script will automatically load it.")
-parser.add_argument("-e", dest="explicit", required=False, help="explicitly designate which chains to match between the true structure and the model, instead of having this be automatically done. Enter without spaces, chains to pair separated by colons (true first, mdodel second) and sets of chains separated by commas, like 'A:H,B:L,E:E,F:F'. If multiple binding locations are allowed for the true structure, use the first one entered (e.g. for -a1 'A:C,B:D' you would use A and B for the true structures' chains)")
+parser.add_argument("-e", dest="explicit", required=False, help="explicitly designate which chains to match between the true structure and the model, instead of having this be automatically done. Enter without spaces, chains to pair separated by colons (true first, mdodel second) and sets of chains separated by commas, like 'A:H,B:L,E:E,F:F'. If multiple binding locations are allowed for the true structure, use the first one entered (e.g. for -ta 'A:C,B:D' you would use A and B for the true structures' chains)")
 parser.add_argument("-mod", dest="mod", required=False, help="model binding partners for random docking instead of crystal binding partners")
-parser.add_argument("-t", dest="t", required=False, help="test mode - enter the pathway to start off all test output files for this flag")
+parser.add_argument("-test", dest="test", required=False, help="test mode - enter the pathway to start off all test output files for this flag")
 parser.add_argument("-mbl", dest="mbl", required=False, help="there are multiple binding locations for a; this flag will take the path / paths to pdb files containing backbone-matched alternative binding locations, separated out by commas if multiple")
 parser.add_argument("-mult", dest="mult", required=False, help="allow matching of multiple chains in the true structure, to the same chain in the model (useful for cases like SnugDock or AbAdapt models, wherein all antigen chains are labeled as just chain A)")
 parser.add_argument("-n", dest="n", required=False, help="the number of valid docking positions to generate; defaults to 1 million, which should take around 1 hour per every 500 residues in the complex")
-parser.add_argument("-i", dest="i", required=False, help="the number of valid interaction residues required to accept the structure; defaults to 1")
+parser.add_argument("-i", dest="i", required=False, help="the number of valid interaction residues required to accept the structure; defaults to 3")
+parser.add_argument("-cla", dest="cla", required=False, help="the number of clashes to allow; defaults to 0")
+parser.add_argument("-sd", dest="sd", required=False, help="the standard deviation of the random step size; defaults to 2.0 Angstroms")
 parser.add_argument("-abm", dest="abm", required=False, help="an optional antibody / TCR mode, which will treat all the loops of the antibody as the binding residues; the antibody structure must use IMGT numbering and its structure must be entered using the -ca argument not the -cb argument.")
-parser.add_argument("-al", dest="al", required=False, help="an optional list of binding residues for the first docking partner (see -ca); this will bias the random docking towards conformations including those residues in the binding site. Should be a list of tuples, where each tuple has the chain followed by the residue number followed by the residue insertion code (or ' ' if no insertion code). Separate each member of the tuple with a comma, and each tuple with a semi-colon, like 'A,100, ;A,100,A;A,100,B'. If you're only giving binding residues for one of the two partners, it must be this one (i.e. you cannot give bl without giving al)")
-parser.add_argument("-bl", dest="bl", required=False, help="an optional list of binding residues for the second docking partner (see -cb); this will bias the random docking towards conformations including those residues in the binding site. Should be a list of tuples, where each tuple has the chain followed by the residue number followed by the residue insertion code (or ' ' if no insertion code). Separate each member of the tuple with a comma, and each tuple with a semi-colon, like 'A,100,;A,100,A;A,200,.'")
+parser.add_argument("-al", dest="al", required=False, help="an optional list of binding residues for the first docking partner (A); this will bias the random docking towards conformations including those residues in the binding site. Should be a list of tuples, where each tuple has the chain followed by the residue number followed by the residue insertion code (or ' ' if no insertion code). Separate each member of the tuple with a comma, and each tuple with a semi-colon, like 'A,100, ;A,100,A;A,100,B'. If you're only giving binding residues for one of the two partners, it must be this one (i.e. you cannot give bl without giving al)")
+parser.add_argument("-bl", dest="bl", required=False, help="an optional list of binding residues for the second docking partner (B); this will bias the random docking towards conformations including those residues in the binding site. Should be a list of tuples, where each tuple has the chain followed by the residue number followed by the residue insertion code (or ' ' if no insertion code). Separate each member of the tuple with a comma, and each tuple with a semi-colon, like 'A,100, ;A,100,A;A,200, '")
 parser.add_argument("-q", dest="q", required=False, help="an optional quick mode for the --al or --abm flags, wherein the docking distribution is skewed towards conformations involving the binding residues given on the A side, to make the calculation much faster")
 parser.add_argument("-limA", dest="limA", required=False, help="Must be used with al or abm, and bl. Optionally limit the range of angles of accepted dockings, wherein each binding partner has a line drawn between its geometric center and the geometric center of its binding residues; one line is used as an axis, and the other is used to calculate the angle of tilt relative to that axis. Primarily useful for TCRpMHC random dockings.")
 parser.add_argument("-cache", dest="cache", required=False, help="Use a cached distribution of underlying distance metrics instead; supply the path to that csv file here.")
@@ -43,15 +45,15 @@ if arguments.bl and ((not arguments.al) and (not arguments.abm)):
     print("-bl can only be used with -al or -abm")
     quit()
 
-if arguments.limA and ((not arguments.al) or (not arguments.abm)):
-    print("-limA can only be used with both -al and -bl")
+if arguments.limA and ((not arguments.al) and (not arguments.abm)):
+    print("-limA can only be used with both (-al or -abm) and -bl")
     quit()
 
 if arguments.limA and (not arguments.bl):
     print("-limA can only be used with both -al and -bl")
     quit()
 
-if (arguments.m != 'dq') and (arguments.m != 'r') and (arguments.m != 'c'):
+if (arguments.d != 'dq') and (arguments.d != 'r') and (arguments.d != 'c'):
     print("-m must be 'dq' for DOCKQ, 'c' for complex RMSD, or 'r' for receptor + ligand RMSD")
     quit()
 
@@ -64,7 +66,7 @@ sys.path.append(arguments.ml)
 import mstpython as mst
 
 fullAtoms = False 
-if arguments.m == 'dq':
+if arguments.d == 'dq':
     fullAtoms = True
 
 outPathP1 = "matchedBackbones/P1"
@@ -108,12 +110,12 @@ def resDictMaker(struct, chainList):
         resesDict[chID] = [chSeq,chNums] #,seq]
     return(resesDict)
 
-aPath = arguments.a
+tPath = arguments.t
 
 try:
-    structA = mst.Structure(aPath, "QUIET")
+    structA = mst.Structure(tPath, "QUIET")
 except:
-    print("loading structure for " + aPath + " failed for some reason; quitting")
+    print("loading structure for " + tPath + " failed for some reason; quitting")
     exit()
 
 aChains = []
@@ -126,27 +128,27 @@ while i < structA.chainSize():
     aChains.append(aChainID)
     i += 1
 
-if arguments.a1 and not arguments.a2:
-    aChains1 = arguments.a1.split(",")
+if arguments.ta and not arguments.tb:
+    aChains1 = arguments.ta.split(",")
     for aC in aChains:
         if aC in aChains1:
             continue 
         aChains2.append(aC)
-elif arguments.a2 and not arguments.a1:
-    aChains2 = arguments.a2.split(",")
+elif arguments.tb and not arguments.ta:
+    aChains2 = arguments.tb.split(",")
     for aC in aChains:
         if aC in aChains2:
             continue 
         aChains1.append(aC)
-elif arguments.a1 and arguments.a2:
-    aChains1 = arguments.a1.split(",")
-    aChains2 = arguments.a2.split(",")
+elif arguments.ta and arguments.tb:
+    aChains1 = arguments.ta.split(",")
+    aChains2 = arguments.tb.split(",")
 else:
-    if aChains.size() == 2:
-        aChains2.append(aChains[0])
+    if len(aChains) == 2:
+        aChains1.append(aChains[0])
         aChains2.append(aChains[1])
     else:
-        print("either -a1 or -a2 is required if there are more than two chains in the crystal structure")
+        print("either -ta or -tb is required if there are more than two chains in the crystal structure")
         exit()
 
 aaCdict = {} #a alt chain Dict
@@ -169,13 +171,13 @@ aChains1base = aChainsBaseChains.copy()
 for aC in aChains2:
     aChainsBaseChains.append(aC)
 
-bPath = arguments.b
-bStart = bPath.split("/")[-1].split(".pdb")[0]
+mPath = arguments.m
+mStart = mPath.split("/")[-1].split(".pdb")[0]
 
 try:
-    structB = mst.Structure(bPath, "QUIET")
+    structB = mst.Structure(mPath, "QUIET")
 except:
-    print("loading structure for " + bPath + " failed for some reason; quitting")
+    print("loading structure for " + mPath + " failed for some reason; quitting")
     exit()
 
 aResesDict = resDictMaker(structA,aChainsBaseChains)
@@ -238,10 +240,6 @@ for keyA in aResesDict:
             abScore = a.score
             scorePercent1 = (float(abScore)/len(seqA))
             scorePercent2 = (float(abScore)/len(seqB))
-
-            print(seqA)
-            print(seqB)
-            print(abScore)
 
             if (scorePercent1 >= 0.8) or (scorePercent2 >= 0.8):
 
@@ -518,10 +516,10 @@ if not os.path.exists(partner1Bpath):
 if not os.path.exists(partner2Bpath):
     os.mkdir(partner2Bpath)
 
-fileCrP1 = partner1Apath + "/" + bStart + fileEnd 
-fileModP1 = partner1Bpath + "/" + bStart + fileEnd 
-fileCrP2 = partner2Apath + "/" + bStart + fileEnd
-fileModP2 = partner2Bpath + "/" + bStart + fileEnd
+fileCrP1 = partner1Apath + "/" + mStart + fileEnd 
+fileModP1 = partner1Bpath + "/" + mStart + fileEnd 
+fileCrP2 = partner2Apath + "/" + mStart + fileEnd
+fileModP2 = partner2Bpath + "/" + mStart + fileEnd
 structP1_crystal = mst.emptyStructure()
 structP2_crystal = mst.emptyStructure()
 structP1_model = mst.emptyStructure()
@@ -545,7 +543,7 @@ structP1_crystal.writePDB(fileCrP1,"QUIET")
 structP1_model.writePDB(fileModP1,"QUIET")
 structP2_crystal.writePDB(fileCrP2,"QUIET")
 structP2_model.writePDB(fileModP2,"QUIET")
-print(bStart + " complex RMSD was: " + str(bestRMSD))
+print(mStart + " complex RMSD was: " + str(bestRMSD))
 
 aaIndex = 0
 for aa in bestAltAatoms:
@@ -556,24 +554,24 @@ for aa in bestAltAatoms:
         altPath = outPathP1 + "/crystalFullAlt"
     if not os.path.exists(altPath):
         os.mkdir(altPath)
-    fileAalt = altPath + "/" + bStart + "_" + str(aaIndex) + fileEnd
+    fileAalt = altPath + "/" + mStart + "_" + str(aaIndex) + fileEnd
     structAalt_out.writePDB(fileAalt,"QUIET")
     aaIndex += 1
 
-jobCommand = 'bin/dockingDistribution --ca "' + fileCrP1 + '" --cb "' + fileCrP2 + '" --da "' +  fileModP1 + '" --db "' + fileModP2 + '"  --o "' + arguments.o + '"'
+jobCommand = 'bin/dockingDistribution --ta "' + fileCrP1 + '" --tb "' + fileCrP2 + '" --ma "' +  fileModP1 + '" --mb "' + fileModP2 + '"  --o "' + arguments.o + '"'
 
 # add on options to jobCommand 
 if arguments.mod:
     jobCommand += ' --m '
 
-if arguments.m == 'r':
-    jobCommand += ' --r '
+if arguments.d == 'r':
+    jobCommand += ' --r 1'
 
-if arguments.m == 'dq':
-    jobCommand += ' --dq '
+if arguments.d == 'dq':
+    jobCommand += ' --dq 1'
 
-if arguments.t:
-    jobCommand += ' --t ' + arguments.t
+if arguments.test:
+    jobCommand += ' --t ' + arguments.test
 
 if arguments.mbl:
     jobCommand += ' --mbl '
@@ -584,8 +582,14 @@ if arguments.n:
 if arguments.i:
     jobCommand += ' --i ' + arguments.i
 
+if arguments.cla:
+    jobCommand += ' --cla ' + arguments.cla
+
+if arguments.sd:
+    jobCommand += ' --sd ' + arguments.sd
+
 if arguments.abm:
-    jobCommand += ' --abm '
+    jobCommand += ' --abm 1'
 
 if arguments.al:
     jobCommand += " --al '" + arguments.al + "'" 
@@ -604,6 +608,8 @@ if arguments.cache:
 
 if arguments.j:
     jobCommand += ' --j '
+
+print(jobCommand)
 
 proc = subprocess.Popen(jobCommand, stdout=subprocess.PIPE, shell=True)
 (bOut, bErr) = proc.communicate()
