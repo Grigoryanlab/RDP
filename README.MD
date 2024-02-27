@@ -1,6 +1,6 @@
 ### CITATION ###
 
-To cite RDP, please cite ***.
+To cite RDP, please cite McCoy, K.M., Ackerman, M.E. and Grigoryan, G., 2024. A significance score for protein–protein interaction models through random docking. Protein Science, 33(2), p.e4853.
 
 
 
